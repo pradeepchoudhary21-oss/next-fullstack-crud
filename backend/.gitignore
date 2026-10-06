@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+.env.local
+
+# Next.js
+.next/
+out/
+
+# Build
+dist/
+
+# macOS
+.DS_Store
+
+# Prisma/AI tool generated files
+backend/.agents/
+backend/.claude/
+backend/.cursor/
+backend/.devin/
+backend/.windsurf/
+backend/migrations/
+
+# Prisma generated client
+backend/src/generated/
