@@ -7,6 +7,7 @@ import {
   updateProduct,
 } from "@/services/productService";
 import { useEffect, useState } from "react";
+import { useDebounce } from "@/hooks/useDebounce";
 
 type Product = {
   id: number;
@@ -25,13 +26,23 @@ export default function Home() {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 500);
+
+  const limit = 4;
+
   useEffect(() => {
     const fetchProducts = async () => {
       try {
         setLoading(true);
         setError("");
-        const product = await getProducts();
-        setProducts(product);
+        const product = await getProducts(currentPage, limit, debouncedSearch);
+        console.log("==", product);
+        setProducts(product.data);
+        setTotalPages(product.pagination.totalPages);
       } catch (error) {
         setError("Failed to load products");
       } finally {
@@ -40,7 +51,7 @@ export default function Home() {
     };
 
     fetchProducts();
-  }, []);
+  }, [currentPage, debouncedSearch]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,6 +89,16 @@ export default function Home() {
 
   return (
     <main className="pt-10">
+      <input
+        type="text"
+        placeholder="Search product..."
+        value={search}
+        onChange={(e) => {
+          setSearch(e.target.value);
+          setCurrentPage(1);
+        }}
+        className="m-2 border p-2"
+      />
       <h1 className="font-medium ml-5 flex-1 justify-center align">
         Product Page
       </h1>
@@ -154,6 +175,26 @@ export default function Home() {
           </button>
         </div>
       ))}
+      <hr />
+      <div className="flex gap-4 mt-4">
+        <button
+          disabled={currentPage === 1}
+          onClick={() => setCurrentPage((prev) => prev - 1)}
+        >
+          Previous
+        </button>
+
+        <span>
+          Page {currentPage} of {totalPages}
+        </span>
+
+        <button
+          disabled={currentPage === totalPages}
+          onClick={() => setCurrentPage((prev) => prev + 1)}
+        >
+          Next
+        </button>
+      </div>
     </main>
   );
 }

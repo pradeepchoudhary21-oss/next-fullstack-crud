@@ -1,7 +1,13 @@
 const API_URL = "http://localhost:5000/api";
 
-export const getProducts = async () => {
-  const response = await fetch(`${API_URL}/products`);
+export const getProducts = async (
+  page: number = 1,
+  limit: number = 10,
+  search: string = "",
+) => {
+  const response = await fetch(
+    `${API_URL}/products?page=${page}&limit=${limit}&search=${search}`,
+  );
 
   if (!response.ok) {
     throw new Error("Failed to fetch products");
