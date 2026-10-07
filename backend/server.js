@@ -3,12 +3,19 @@ import express from "express";
 import cors from "cors";
 import { PrismaClient } from "./src/generated/client.ts";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { error } from "node:console";
 import errorHandler from "./middleware/errorHandler.js";
 import authRoutes from "./routes/authRoutes.js";
 import authMiddleware from "./middleware/authMiddleware.js";
+import pg from "pg";
+import { pipeline } from "@xenova/transformers";
+import multer from "multer";
+import { PDFParse } from "pdf-parse";
 
 const app = express();
+
+// ======================================================
+// PRISMA
+// ======================================================
 
 const adapter = new PrismaPg({
   connectionString: process.env.DATABASE_URL,
@@ -16,12 +23,40 @@ const adapter = new PrismaPg({
 
 export const prisma = new PrismaClient({ adapter });
 
+// ======================================================
+// MIDDLEWARE
+// ======================================================
+
 app.use(cors());
 app.use(express.json());
 
+// ======================================================
+// AUTH
+// ======================================================
+
 app.use("/api/auth", authRoutes);
 
-app.get("/api/products", authMiddleware, async (req, res, next) => {
+// ======================================================
+// POSTGRES POOL
+// ======================================================
+
+const { Pool } = pg;
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+});
+
+// ======================================================
+// OPENROUTER
+// ======================================================
+
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+// ======================================================
+// PRODUCTS API
+// ======================================================
+
+app.get("/api/products", async (req, res, next) => {
   try {
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 10;
@@ -65,11 +100,14 @@ app.get("/api/products", authMiddleware, async (req, res, next) => {
   }
 });
 
+// ======================================================
+// CREATE PRODUCT
+// ======================================================
+
 app.post("/api/products", authMiddleware, async (req, res, next) => {
   try {
     const { name, price } = req.body;
 
-    // Validation
     if (!name || typeof name !== "string") {
       return res.status(400).json({
         error: "Product name is required",
@@ -84,7 +122,6 @@ app.post("/api/products", authMiddleware, async (req, res, next) => {
       });
     }
 
-    // Create product
     const product = await prisma.product.create({
       data: {
         name: name.trim(),
@@ -94,21 +131,19 @@ app.post("/api/products", authMiddleware, async (req, res, next) => {
 
     res.status(201).json(product);
   } catch (error) {
-    // console.error(error);
-
-    // res.status(500).json({
-    //   error: "Failed to create product",
-    // });
     next(error);
   }
 });
+
+// ======================================================
+// UPDATE PRODUCT
+// ======================================================
 
 app.put("/api/products/:id", authMiddleware, async (req, res, next) => {
   try {
     const { id } = req.params;
     const { name, price } = req.body;
 
-    // Validation
     if (!name || typeof name !== "string") {
       return res.status(400).json({
         error: "Product name is required",
@@ -136,15 +171,15 @@ app.put("/api/products/:id", authMiddleware, async (req, res, next) => {
     res.json(product);
   } catch (error) {
     console.error(error);
-
-    // res.status(500).json({
-    //   error: "Failed to update product",
-    // });
     next(error);
   }
 });
 
-app.delete("/api/products/:id", authMiddleware, async (req, res, next) => {
+// ======================================================
+// DELETE PRODUCT
+// ======================================================
+
+app.delete("/api/products/:id", async (req, res, next) => {
   try {
     const { id } = req.params;
 
@@ -157,15 +192,522 @@ app.delete("/api/products/:id", authMiddleware, async (req, res, next) => {
     res.json(product);
   } catch (error) {
     console.error(error);
-    // res.status(500).json({
-    //   error: "Failed to delete product",
-    // });
     next(error);
   }
 });
 
-// Error handler — हमेशा routes के बाद
+// ======================================================
+// RANDOM MESSAGE
+// ======================================================
+
+app.get("/api/message", async (req, res, next) => {
+  try {
+    const messages = [
+      "This is my first response",
+      "This is my second response",
+      "This is my third response",
+      "This is my fourth response",
+    ];
+
+    const randomIndex = Math.floor(Math.random() * messages.length);
+
+    res.status(200).json({
+      message: messages[randomIndex],
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ======================================================
+// SIMPLE AI API
+// ======================================================
+
+app.post("/api/ai", async (req, res, next) => {
+  try {
+    const { question } = req.body;
+
+    // Validate request
+    if (!question || typeof question !== "string") {
+      return res.status(400).json({
+        message: "Question is required",
+      });
+    }
+
+    const trimmedQuestion = question.trim();
+
+    if (trimmedQuestion.length > 2000) {
+      return res.status(400).json({
+        message: "Question is too long",
+      });
+    }
+
+    // Call OpenRouter
+    const response = await fetch(OPENROUTER_URL, {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "HTTP-Referer": "http://localhost:3000",
+        "X-Title": "My AI Learning App",
+      },
+
+      body: JSON.stringify({
+        model: "openrouter/free",
+
+        messages: [
+          {
+            role: "system",
+            content:
+              "Answer clearly and briefly. Do not provide unnecessary explanation.",
+          },
+          {
+            role: "user",
+            content: trimmedQuestion,
+          },
+        ],
+
+        max_tokens: 150,
+        temperature: 0.2,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("OpenRouter error:", data);
+
+      return res.status(response.status).json({
+        message: "AI request failed",
+        error: data?.error?.message || "Unknown OpenRouter error",
+      });
+    }
+
+    const answer = data?.choices?.[0]?.message?.content;
+
+    if (!answer) {
+      return res.status(502).json({
+        message: "AI returned an empty response",
+      });
+    }
+
+    return res.status(200).json({
+      answer,
+      model: data.model,
+      usage: data.usage || null,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ======================================================
+// PDF MEMORY STORAGE
+// ======================================================
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10 MB
+  },
+});
+
+// ======================================================
+// EMBEDDING MODEL
+// ======================================================
+
+let embedder;
+
+async function getEmbedder() {
+  if (!embedder) {
+    console.log("Loading embedding model...");
+
+    embedder = await pipeline("feature-extraction", "Xenova/all-MiniLM-L6-v2");
+
+    console.log("Embedding model loaded");
+  }
+
+  return embedder;
+}
+
+// ======================================================
+// CREATE EMBEDDING
+// ======================================================
+
+async function createEmbedding(text) {
+  const model = await getEmbedder();
+
+  const output = await model(text, {
+    pooling: "mean",
+    normalize: true,
+  });
+
+  return Array.from(output.data);
+}
+
+// ======================================================
+// CREATE TEXT CHUNKS
+// 150 WORDS + 30 WORD OVERLAP
+// ======================================================
+
+function createChunks(text, chunkSize = 150, overlap = 30) {
+  const words = text.split(/\s+/);
+
+  const chunks = [];
+
+  for (let i = 0; i < words.length; i += chunkSize - overlap) {
+    const chunk = words
+      .slice(i, i + chunkSize)
+      .join(" ")
+      .trim();
+
+    if (chunk) {
+      chunks.push(chunk);
+    }
+  }
+
+  return chunks;
+}
+
+// ======================================================
+// UPLOAD PDF
+// PDF → TEXT → CHUNKS → EMBEDDINGS → POSTGRESQL
+// ======================================================
+
+app.post("/api/documents", upload.single("pdf"), async (req, res, next) => {
+  try {
+    // -----------------------------------------------
+    // Validate PDF
+    // -----------------------------------------------
+
+    if (!req.file) {
+      return res.status(400).json({
+        message: "PDF file is required",
+      });
+    }
+
+    if (req.file.mimetype !== "application/pdf") {
+      return res.status(400).json({
+        message: "Only PDF files are allowed",
+      });
+    }
+
+    console.log("PDF received:", req.file.originalname);
+
+    // -----------------------------------------------
+    // Extract PDF text
+    // -----------------------------------------------
+
+    const parser = new PDFParse({
+      data: req.file.buffer,
+    });
+
+    const pdfData = await parser.getText();
+
+    const text = pdfData.text;
+
+    await parser.destroy();
+
+    console.log("Extracted characters:", text.length);
+
+    if (!text.trim()) {
+      return res.status(400).json({
+        message: "No readable text found in PDF",
+      });
+    }
+
+    // -----------------------------------------------
+    // Create document
+    // -----------------------------------------------
+
+    const documentResult = await pool.query(
+      `
+          INSERT INTO documents(name)
+          VALUES($1)
+          RETURNING id, name
+        `,
+      [req.file.originalname],
+    );
+
+    const document = documentResult.rows[0];
+
+    // -----------------------------------------------
+    // Create chunks
+    // -----------------------------------------------
+
+    const chunks = createChunks(text);
+
+    console.log("Total chunks:", chunks.length);
+
+    // -----------------------------------------------
+    // Generate embeddings
+    // -----------------------------------------------
+
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i];
+
+      console.log(`Embedding ${i + 1}/${chunks.length}`);
+
+      const embedding = await createEmbedding(chunk);
+
+      // ---------------------------------------------
+      // Save chunk + embedding
+      // ---------------------------------------------
+
+      await pool.query(
+        `
+            INSERT INTO document_chunks
+            (
+              document_id,
+              content,
+              embedding,
+              chunk_index
+            )
+            VALUES($1, $2, $3::vector, $4)
+          `,
+        [document.id, chunk, JSON.stringify(embedding), i],
+      );
+    }
+
+    // Original PDF is NOT saved.
+    // req.file.buffer remains only in memory
+    // and becomes eligible for garbage collection.
+
+    res.status(201).json({
+      message: "PDF processed successfully",
+      documentId: document.id,
+      fileName: document.name,
+      chunks: chunks.length,
+    });
+  } catch (error) {
+    console.error("PDF processing error:", error);
+
+    next(error);
+  }
+});
+
+// ======================================================
+// ASK QUESTION
+// QUESTION → EMBEDDING → VECTOR SEARCH → OPENROUTER
+// ======================================================
+
+app.post("/api/documents/:documentId/ask", async (req, res, next) => {
+  try {
+    const { documentId } = req.params;
+    const { question } = req.body;
+
+    // -----------------------------------------------
+    // Validate question
+    // -----------------------------------------------
+
+    if (!question || typeof question !== "string") {
+      return res.status(400).json({
+        message: "Question is required",
+      });
+    }
+
+    const trimmedQuestion = question.trim();
+
+    if (!trimmedQuestion) {
+      return res.status(400).json({
+        message: "Question cannot be empty",
+      });
+    }
+
+    // -----------------------------------------------
+    // Validate document ID
+    // -----------------------------------------------
+
+    const numericDocumentId = Number(documentId);
+
+    if (!Number.isInteger(numericDocumentId) || numericDocumentId <= 0) {
+      return res.status(400).json({
+        message: "Invalid document ID",
+      });
+    }
+
+    // -----------------------------------------------
+    // Create embedding for question
+    // -----------------------------------------------
+
+    console.log("Creating question embedding...");
+
+    const questionEmbedding = await createEmbedding(trimmedQuestion);
+
+    // -----------------------------------------------
+    // Vector similarity search
+    // -----------------------------------------------
+
+    const result = await pool.query(
+      `
+          SELECT
+            content,
+            1 - (embedding <=> $1::vector)
+              AS similarity
+          FROM document_chunks
+          WHERE document_id = $2
+          ORDER BY embedding <=> $1::vector
+          LIMIT 3
+        `,
+      [JSON.stringify(questionEmbedding), numericDocumentId],
+    );
+
+    // -----------------------------------------------
+    // No matching document
+    // -----------------------------------------------
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        message: "No document data found",
+      });
+    }
+
+    console.log("Relevant chunks:", result.rows.length);
+
+    // -----------------------------------------------
+    // Build context
+    // -----------------------------------------------
+
+    const context = result.rows.map((row) => row.content).join("\n\n");
+
+    // -----------------------------------------------
+    // OpenRouter FREE MODEL
+    // -----------------------------------------------
+
+    const openRouterResponse = await fetch(OPENROUTER_URL, {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+
+        "HTTP-Referer": "http://localhost:3000",
+
+        "X-Title": "PDF RAG Learning App",
+      },
+
+      body: JSON.stringify({
+        model: "openrouter/free",
+
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a document question-answering assistant. Answer only from the provided context. If the answer is not present in the context, say: I couldn't find that information in the document. Keep the answer concise.",
+          },
+
+          {
+            role: "user",
+            content: `
+Context:
+
+${context}
+
+Question:
+
+${trimmedQuestion}
+                `,
+          },
+        ],
+
+        max_tokens: 200,
+        temperature: 0.1,
+      }),
+    });
+
+    const data = await openRouterResponse.json();
+
+    console.log("OPENROUTER FULL RESPONSE:", JSON.stringify(data, null, 2));
+
+    if (!openRouterResponse.ok) {
+      console.error("OpenRouter error:", data);
+
+      return res.status(502).json({
+        message: "OpenRouter request failed",
+        error: data?.error?.message || "Unknown OpenRouter error",
+      });
+    }
+
+    // -----------------------------------------------
+    // OpenRouter error
+    // -----------------------------------------------
+
+    // if (!openRouterResponse.ok) {
+    //   console.error("OpenRouter error:", data);
+
+    //   return res.status(502).json({
+    //     message: "OpenRouter request failed",
+
+    //     error: data?.error?.message || "Unknown OpenRouter error",
+    //   });
+    // }
+
+    // -----------------------------------------------
+    // Extract answer
+    // -----------------------------------------------
+
+    // const answer = data?.choices?.[0]?.message?.content;
+
+    // if (!answer) {
+    //   return res.status(502).json({
+    //     message: "OpenRouter returned an empty response",
+    //   });
+    // }
+
+    const message = data?.choices?.[0]?.message;
+
+    const answer = message?.content;
+
+    if (!answer) {
+      console.error(
+        "OpenRouter returned no content:",
+        JSON.stringify(message, null, 2),
+      );
+
+      return res.status(502).json({
+        message: "OpenRouter returned no text content",
+        model: data?.model || null,
+        finishReason: data?.choices?.[0]?.finish_reason || null,
+        message: message || null,
+      });
+    }
+
+    // -----------------------------------------------
+    // Final response
+    // -----------------------------------------------
+
+    res.json({
+      answer,
+
+      model: data.model,
+
+      usage: data.usage || null,
+
+      sources: result.rows.map((row) => ({
+        similarity: Number(row.similarity),
+
+        content: row.content,
+      })),
+    });
+  } catch (error) {
+    console.error("Question answering error:", error);
+
+    next(error);
+  }
+});
+
+// ======================================================
+// ERROR HANDLER
+// ======================================================
+
 app.use(errorHandler);
+
+// ======================================================
+// START SERVER
+// ======================================================
 
 app.listen(5000, () => {
   console.log("Server running on http://localhost:5000");
