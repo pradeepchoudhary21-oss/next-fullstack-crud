@@ -1,5 +1,11 @@
 "use client";
 
+import {
+  createProduct,
+  deleteProduct,
+  getProducts,
+  updateProduct,
+} from "@/services/productService";
 import { useEffect, useState } from "react";
 
 type Product = {
@@ -15,74 +21,66 @@ export default function Home() {
   const [price, setPrice] = useState("");
   const [editingId, setEditingId] = useState<number | null>(null);
 
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
   useEffect(() => {
-    fetch("http://localhost:5000/api/products")
-      .then((res) => res.json())
-      .then((data) => setProducts(data))
-      .catch((error) => console.error(error));
+    const fetchProducts = async () => {
+      try {
+        setLoading(true);
+        setError("");
+        const product = await getProducts();
+        setProducts(product);
+      } catch (error) {
+        setError("Failed to load products");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchProducts();
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const response = await fetch("http://localhost:5000/api/products", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name,
-        price,
-      }),
-    });
+    try {
+      setSubmitting(true);
 
-    const newProduct = await response.json();
+      const newProduct = await createProduct(name, price);
+      setProducts((prev) => [...prev, newProduct]);
 
-    setProducts((prev) => [...prev, newProduct]);
-
-    setName("");
-    setPrice("");
+      setName("");
+      setPrice("");
+    } catch (error) {
+      setError("Failed to create product");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleDelete = async (id: number) => {
-    const response = await fetch(`http://localhost:5000/api/products/${id}`, {
-      method: "DELETE",
-    });
-
-    if (!response.ok) {
-      console.error("Failed to delete product");
-      return;
-    }
-
+    await deleteProduct(id);
     setProducts((prev) => prev.filter((product) => product.id !== id));
   };
 
   const handleUpdate = async (id: number) => {
-    const response = await fetch(`http://localhost:5000/api/products/${id}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        name,
-        price,
-      }),
-    });
-
-    const updatedProduct = await response.json();
+    const updatedProduct = await updateProduct(id, name, price);
 
     setProducts((prev) =>
       prev.map((product) => (product.id === id ? updatedProduct : product)),
     );
-
     setEditingId(null);
     setName("");
     setPrice("");
   };
 
   return (
-    <main>
-      <h1>Products</h1>
+    <main className="pt-10">
+      <h1 className="font-medium ml-5 flex-1 justify-center align">
+        Product Page
+      </h1>
 
       <form
         onSubmit={(e) => {
@@ -94,12 +92,14 @@ export default function Home() {
             handleSubmit(e);
           }
         }}
+        className="m-2"
       >
         <input
           type="text"
           placeholder="Product name"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          className="border mr-10"
         />
 
         <input
@@ -107,14 +107,28 @@ export default function Home() {
           placeholder="Price"
           value={price}
           onChange={(e) => setPrice(e.target.value)}
+          className="border mr-10"
         />
 
-        <button type="submit">
-          {editingId !== null ? "Update Product" : "Add Product"}
+        <button
+          disabled={submitting}
+          type="submit"
+          className="border-2 p-2 rounded-2xl bg-amber-500"
+        >
+          {editingId !== null ? (
+            "Update Product"
+          ) : submitting ? (
+            <p>creating...</p>
+          ) : (
+            "Add Product"
+          )}
         </button>
       </form>
 
       <hr />
+
+      {loading && <p>Loading products...</p>}
+      {error && <p className="font-stretch-50 text-red-600">{error}</p>}
 
       {products.map((product) => (
         <div key={product.id}>
@@ -127,11 +141,17 @@ export default function Home() {
               setName(product.name);
               setPrice(String(product.price));
             }}
+            className="mr-10 border-2 rounded-2xl p-2 bg-amber-950"
           >
             Update
           </button>
 
-          <button onClick={() => handleDelete(product.id)}>Delete</button>
+          <button
+            className="mr-10 border-2 rounded-2xl p-2 bg-amber-950"
+            onClick={() => handleDelete(product.id)}
+          >
+            Delete
+          </button>
         </div>
       ))}
     </main>
