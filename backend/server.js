@@ -5,6 +5,8 @@ import { PrismaClient } from "./src/generated/client.ts";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { error } from "node:console";
 import errorHandler from "./middleware/errorHandler.js";
+import authRoutes from "./routes/authRoutes.js";
+import authMiddleware from "./middleware/authMiddleware.js";
 
 const app = express();
 
@@ -12,12 +14,14 @@ const adapter = new PrismaPg({
   connectionString: process.env.DATABASE_URL,
 });
 
-const prisma = new PrismaClient({ adapter });
+export const prisma = new PrismaClient({ adapter });
 
 app.use(cors());
 app.use(express.json());
 
-app.get("/api/products", async (req, res, next) => {
+app.use("/api/auth", authRoutes);
+
+app.get("/api/products", authMiddleware, async (req, res, next) => {
   try {
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 10;
@@ -61,7 +65,7 @@ app.get("/api/products", async (req, res, next) => {
   }
 });
 
-app.post("/api/products", async (req, res, next) => {
+app.post("/api/products", authMiddleware, async (req, res, next) => {
   try {
     const { name, price } = req.body;
 
@@ -99,7 +103,7 @@ app.post("/api/products", async (req, res, next) => {
   }
 });
 
-app.put("/api/products/:id", async (req, res, next) => {
+app.put("/api/products/:id", authMiddleware, async (req, res, next) => {
   try {
     const { id } = req.params;
     const { name, price } = req.body;
@@ -140,7 +144,7 @@ app.put("/api/products/:id", async (req, res, next) => {
   }
 });
 
-app.delete("/api/products/:id", async (req, res, next) => {
+app.delete("/api/products/:id", authMiddleware, async (req, res, next) => {
   try {
     const { id } = req.params;
 
