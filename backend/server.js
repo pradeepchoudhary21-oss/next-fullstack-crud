@@ -200,25 +200,6 @@ app.delete("/api/products/:id", async (req, res, next) => {
 // RANDOM MESSAGE
 // ======================================================
 
-app.get("/api/message", async (req, res, next) => {
-  try {
-    const messages = [
-      "This is my first response",
-      "This is my second response",
-      "This is my third response",
-      "This is my fourth response",
-    ];
-
-    const randomIndex = Math.floor(Math.random() * messages.length);
-
-    res.status(200).json({
-      message: messages[randomIndex],
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
 // ======================================================
 // SIMPLE AI API
 // ======================================================
@@ -254,22 +235,23 @@ app.post("/api/ai", async (req, res, next) => {
       },
 
       body: JSON.stringify({
-        model: "openrouter/free",
-
+        model: "nvidia/nemotron-3.5-lightning:free",
         messages: [
           {
             role: "system",
             content:
-              "Answer clearly and briefly. Do not provide unnecessary explanation.",
+              "Answer clearly and briefly. Keep the answer under 3 sentences.",
           },
           {
             role: "user",
-            content: trimmedQuestion,
+            content: question,
           },
         ],
-
-        max_tokens: 150,
-        temperature: 0.2,
+        reasoning: {
+          effort: "none",
+        },
+        max_tokens: 50,
+        temperature: 0,
       }),
     });
 
@@ -630,8 +612,6 @@ ${trimmedQuestion}
     });
 
     const data = await openRouterResponse.json();
-
-    console.log("OPENROUTER FULL RESPONSE:", JSON.stringify(data, null, 2));
 
     if (!openRouterResponse.ok) {
       console.error("OpenRouter error:", data);
