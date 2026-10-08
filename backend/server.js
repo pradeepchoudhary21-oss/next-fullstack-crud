@@ -590,31 +590,42 @@ app.post("/api/documents/:documentId/ask", async (req, res, next) => {
       },
 
       body: JSON.stringify({
-        model: "openrouter/free",
+        model: "nvidia/nemotron-3.5-lightning:free",
 
         messages: [
           {
             role: "system",
-            content:
-              "You are a document question-answering assistant. Answer only from the provided context. If the answer is not present in the context, say: I couldn't find that information in the document. Keep the answer concise.",
-          },
+            content: `You are a strict document Q&A assistant.
 
+Answer ONLY using the provided document context.
+Do not use your own knowledge.
+Do not guess.
+Do not modify names.
+
+If the answer is not clearly present, say:
+"I couldn't find that information in the document."
+
+Keep the answer to one short sentence.`,
+          },
           {
             role: "user",
             content: `
-Context:
+Document Context:
 
 ${context}
 
 Question:
 
 ${trimmedQuestion}
-                `,
+      `,
           },
         ],
 
-        max_tokens: 200,
-        temperature: 0.1,
+        reasoning: {
+          effort: "none",
+        },
+        max_tokens: 30,
+        temperature: 0,
       }),
     });
 
